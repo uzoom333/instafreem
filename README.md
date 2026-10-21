@@ -95,3 +95,13 @@ Pontos que já quebraram o app quando foram mudados:
 - Não injete o dylib uma segunda vez no Sideloadly.
 
 O construtor cedo só prepara a pasta falsa de app group. O resto dos hooks entra depois, na fila principal. Strings passadas ao `NSString` passam por `IFStr()`.
+
+## 6. Testes (sem iPhone)
+
+Testam o empacotador num `Instagram.app` falso e as regras que apagam curtidas, sem o IPA de verdade. Precisam de Zig no PATH e de Pillow:
+
+```text
+python -m unittest discover -s tests -v
+```
+
+Os testes linkam contra os stubs `.tbd` de `tests/stubs`, porque fora do Windows o `-undefined dynamic_lookup` derruba o linker do Zig 0.17. O dylib que eles geram é só para teste. O do iPhone continua saindo do passo 3.

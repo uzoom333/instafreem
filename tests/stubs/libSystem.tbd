@@ -1,0 +1,9 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+exports:
+  - targets:     [ arm64-ios ]
+    symbols:     [ _strcmp, _strstr, _strlen, _syslog, _dlopen, _dlsym, _memset, _memcpy, _bzero,
+                   ___stack_chk_fail, ___stack_chk_guard, dyld_stub_binder, ___tls_get_addr, __tlv_bootstrap ]
+...
