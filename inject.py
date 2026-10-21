@@ -17,7 +17,13 @@ DYLIB = os.path.join(ROOT, "packages", "InstagramMod.dylib")
 OUT = os.path.join(ROOT, "packages", "Instagram.ipa")
 LOAD_PATH = b"@executable_path/InstagramMod.dylib"
 LC_LOAD_DYLIB = 0xC
-FONT = r"C:\Windows\Fonts\arial.ttf"
+FONTS = [
+    os.environ.get("INSTAFREEM_FONT", ""),
+    r"C:\Windows\Fonts\arial.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+]
 
 METAL = {
     "Metal@2x.png": 120,
@@ -37,6 +43,11 @@ def patch_binary(data: bytes) -> bytes:
     off = 32
     for _ in range(ncmds):
         cmd, cmdsize = struct.unpack_from("<II", data, off)
+        if cmd == LC_LOAD_DYLIB:
+            name_off = struct.unpack_from("<I", data, off + 8)[0]
+            if data[off + name_off : off + cmdsize].split(b"\x00", 1)[0] == LOAD_PATH:
+                # injetar de novo carrega o tweak duas vezes e o app fecha na splash
+                raise SystemExit("o binario de origem ja tem o InstagramMod.dylib; use a pasta descriptografada original")
         if cmd == 0x19:
             nsects = struct.unpack_from("<I", data, off + 64)[0]
             sec = off + 72
@@ -73,7 +84,7 @@ def grayscale(im: Image.Image, size: int) -> Image.Image:
 def splash_text(size: int) -> Image.Image:
     im = Image.new("RGBA", (size, size), (0, 0, 0, 255))
     draw = ImageDraw.Draw(im)
-    font = ImageFont.truetype(FONT, max(12, size // 7))
+    font = splash_font(max(12, size // 7))
     text = "modded by\nAeromorto"
     box = draw.multiline_textbbox((0, 0), text, font=font, align="center", spacing=2)
     width = box[2] - box[0]
@@ -81,6 +92,13 @@ def splash_text(size: int) -> Image.Image:
     xy = ((size - width) / 2 - box[0], (size - height) / 2 - box[1])
     draw.multiline_text(xy, text, font=font, fill=(255, 255, 255, 255), align="center", spacing=2)
     return im
+
+
+def splash_font(size: int):
+    for path in FONTS:
+        if path and os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default(size)
 
 
 def png_bytes(im: Image.Image) -> bytes:
@@ -325,6 +343,8 @@ def main() -> None:
             for name in files:
                 full = os.path.join(dirpath, name)
                 rel = os.path.relpath(full, SRC).replace("\\", "/")
+                if rel == "Payload/Instagram.app/InstagramMod.dylib":
+                    continue  # o dylib novo entra no fim; evita entrada duplicada no zip
                 if rel == "Payload/Instagram.app/Instagram":
                     data = binary
                 elif rel == "Payload/Instagram.app/Info.plist":

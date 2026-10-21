@@ -1,4 +1,4 @@
-__pycache__/
-*.pyc
-packages/*.ipa
 packages/*.dylib
+packages/*.ipa
+*.pyc
+__pycache__/

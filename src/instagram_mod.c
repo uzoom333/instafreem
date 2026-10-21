@@ -107,111 +107,6 @@ static unsigned long long IFCount(id obj) {
     return ((unsigned long long (*)(id, SEL))objc_msgSend)(obj, s_count);
 }
 
-static id IFFilterSurfaces(id surfaces) {
-    if (!surfaces || !c_array || !c_mutArray) return surfaces;
-    if (!((IFBool (*)(id, SEL, Class))objc_msgSend)(surfaces, s_isKind, c_array)) return surfaces;
-    unsigned long long count = IFCount(surfaces);
-    if (count == 0) return surfaces;
-    id keep = ((id (*)(id, SEL))objc_msgSend)((id)c_mutArray, s_array);
-    int removed = 0;
-    for (unsigned long long i = 0; i < count; i++) {
-        id surface = ((id (*)(id, SEL, unsigned long long))objc_msgSend)(surfaces, s_objectAt, i);
-        if (IFBannedTab(surface)) {
-            removed = 1;
-            continue;
-        }
-        ((void (*)(id, SEL, id))objc_msgSend)(keep, s_addObject, surface);
-    }
-    if (!removed || IFCount(keep) == 0) return surfaces;
-    return ((id (*)(id, SEL))objc_msgSend)(keep, s_copy);
-}
-
-static id (*orig_initSurfaces)(id, SEL, id, id, IFBool, id);
-
-static id IFInitSurfaces(id self, SEL _cmd, id surfaces, id controller, IFBool haptics, id set) {
-    if (!orig_initSurfaces) return nil;
-    return orig_initSurfaces(self, _cmd, IFFilterSurfaces(surfaces), controller, haptics, set);
-}
-
-static id (*orig_allSurfaces)(id, SEL);
-
-static id IFAllSurfaces(id self, SEL _cmd) {
-    if (!orig_allSurfaces) return nil;
-    return IFFilterSurfaces(orig_allSurfaces(self, _cmd));
-}
-
-static id IFFallbackSurface(id controller) {
-    static __thread int guard;
-    if (guard || !orig_allSurfaces) return nil;
-    guard = 1;
-    id surfaces = orig_allSurfaces(controller, sel_registerName("allTabBarSurfaces"));
-    id found = nil;
-    if (surfaces) {
-        surfaces = IFFilterSurfaces(surfaces);
-        unsigned long long count = IFCount(surfaces);
-        id first = nil;
-        for (unsigned long long i = 0; i < count; i++) {
-            id surface = ((id (*)(id, SEL, unsigned long long))objc_msgSend)(surfaces, s_objectAt, i);
-            if (IFBannedTab(surface)) continue;
-            if (!first) first = surface;
-            if (!c_intent || !((IFBool (*)(id, SEL, Class))objc_msgSend)(surface, s_isKind, c_intent)) continue;
-            id tab = ((id (*)(id, SEL))objc_msgSend)(surface, s_tabString);
-            const char *name = IFUTF8(tab);
-            if (name && strcmp(name, "FEED") == 0) {
-                found = surface;
-                break;
-            }
-        }
-        if (!found) found = first;
-    }
-    guard = 0;
-    return found;
-}
-
-static void (*orig_sel2)(id, SEL, id, IFBool);
-static void IFSel2(id self, SEL _cmd, id surface, IFBool animated) {
-    if (!orig_sel2) return;
-    if (IFBannedTab(surface)) {
-        id home = IFFallbackSurface(self);
-        if (home) orig_sel2(self, _cmd, home, animated);
-        return;
-    }
-    orig_sel2(self, _cmd, surface, animated);
-}
-
-static void (*orig_sel3)(id, SEL, id, IFBool, IFBool);
-static void IFSel3(id self, SEL _cmd, id surface, IFBool animated, IFBool indicator) {
-    if (!orig_sel3) return;
-    if (IFBannedTab(surface)) {
-        id home = IFFallbackSurface(self);
-        if (home) orig_sel3(self, _cmd, home, animated, indicator);
-        return;
-    }
-    orig_sel3(self, _cmd, surface, animated, indicator);
-}
-
-static void (*orig_selSkip)(id, SEL, id, IFBool, IFBool);
-static void IFSelSkip(id self, SEL _cmd, id surface, IFBool animated, IFBool skip) {
-    if (!orig_selSkip) return;
-    if (IFBannedTab(surface)) {
-        id home = IFFallbackSurface(self);
-        if (home) orig_selSkip(self, _cmd, home, animated, skip);
-        return;
-    }
-    orig_selSkip(self, _cmd, surface, animated, skip);
-}
-
-static void (*orig_sel4)(id, SEL, id, IFBool, IFBool, IFBool);
-static void IFSel4(id self, SEL _cmd, id surface, IFBool animated, IFBool skip, IFBool indicator) {
-    if (!orig_sel4) return;
-    if (IFBannedTab(surface)) {
-        id home = IFFallbackSurface(self);
-        if (home) orig_sel4(self, _cmd, home, animated, skip, indicator);
-        return;
-    }
-    orig_sel4(self, _cmd, surface, animated, skip, indicator);
-}
-
 static int IFHideViewName(const char *name) {
     if (!name || strstr(name, "LaunchScreen") || strstr(name, "TabBar")) return 0;
     if (strstr(name, "InstantReply")) return 0;
@@ -596,35 +491,6 @@ static void IFHideSelf(id self) {
     ((void (*)(id, SEL, IFBool))objc_msgSend)(self, s_userInt, 0);
 }
 
-#define IF_WATCH_MAX 16
-static Class g_watchCls[IF_WATCH_MAX];
-static void (*g_watchOrig[IF_WATCH_MAX])(id, SEL);
-static int g_watchN;
-
-static void IFLayoutHide(id self, SEL _cmd) {
-    Class cls = object_getClass(self);
-    for (int i = 0; i < g_watchN; i++) {
-        if (g_watchCls[i] == cls && g_watchOrig[i]) {
-            g_watchOrig[i](self, _cmd);
-            break;
-        }
-    }
-    IFHideSelf(self);
-}
-
-static int IFWatch(const char *name) {
-    if (g_watchN >= IF_WATCH_MAX) return 0;
-    Class cls = objc_getClass(name);
-    if (!cls) return 0;
-    for (int i = 0; i < g_watchN; i++) if (g_watchCls[i] == cls) return 1;
-    void *orig = NULL;
-    if (!IFSwizzleOwn(cls, "layoutSubviews", IFLayoutHide, &orig)) return 0;
-    g_watchCls[g_watchN] = cls;
-    g_watchOrig[g_watchN] = (void (*)(id, SEL))orig;
-    g_watchN++;
-    return 1;
-}
-
 static int IFLabelHasReels(id text) {
     const char *s = IFUTF8(text);
     if (!s) return 0;
@@ -912,8 +778,11 @@ static int IFLikePhrase(const char *raw) {
     if (raw[n]) return 0;
     buf[n] = 0;
     if (n == 0 || n > 80) return 0;
-    if (strstr(buf, "liked by") || strstr(buf, "curtido por") || strstr(buf, "outras pessoas") || strstr(buf, "and others")) return 1;
-    if (strstr(buf, "sponsored") || strstr(buf, "patrocin") || strstr(buf, "publicidade")) return 1;
+    // setText: chega antes de o label entrar na tela, sem superview para dizer se é DM.
+    // Por isso a frase precisa ser a linha inteira de contagem, e não uma palavra
+    // solta: "isso é publicidade" numa DM não pode sumir.
+    if (strstr(buf, "liked by ") == buf || strstr(buf, "curtido por ") == buf) return 1;
+    if (strcmp(buf, "sponsored") == 0 || strcmp(buf, "patrocinado") == 0 || strcmp(buf, "publicidade") == 0) return 1;
     const char *words[] = {
         " curtidas", " curtida", " likes", " like",
         " comments", " comment", " comentarios", " comentario",
